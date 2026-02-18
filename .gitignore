@@ -148,6 +148,8 @@ dmypy.json
 configs/local/default.yaml
 /data/*
 !/data/.gitkeep
+# Allow CSV annotation files (samplesheet and manifest)
+!/data/ajhg2020/*.csv
 /logs/*
 !/logs/.gitkeep
 .env
@@ -170,12 +172,15 @@ tutorials/dependencies/
 # Feather files
 *.feather
 *.arrow
+*.parquet
 
 # VS Code Profile
 CpGPT.code-profile
 
-# CSV
+# CSV (ignore all, but allow specific annotation files)
 *.csv
+!data/ajhg2020/samplesheet.csv
+!data/ajhg2020/manifest.csv
 
 # Checkpoints
 *.ckpt

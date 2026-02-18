@@ -37,7 +37,12 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Function to load and combine data from multiple GSEs
 load_combined_data <- function(data_dir) {
-  gse_dirs <- list.dirs(data_dir, recursive = FALSE, full.names = TRUE)
+  # Find all GSE directories (may be nested: GSE/GPL/)
+  gse_dirs <- list.dirs(data_dir, recursive = TRUE, full.names = TRUE)
+  # Filter to only directories that contain data files (beta.csv or beta.rds)
+  gse_dirs <- gse_dirs[sapply(gse_dirs, function(d) {
+    any(file.exists(file.path(d, c("beta.csv", "beta.rds", "M.csv", "M.rds"))))
+  })]
   gse_dirs <- gse_dirs[basename(gse_dirs) != "cpgpt_processed"]
   
   all_beta <- NULL
@@ -45,16 +50,38 @@ load_combined_data <- function(data_dir) {
   all_pheno <- NULL
   
   for (gse_dir in gse_dirs) {
-    gse_id <- basename(gse_dir)
-    beta_file <- file.path(gse_dir, "beta.rds")
-    M_file <- file.path(gse_dir, "M.rds")
-    pheno_file <- file.path(gse_dir, "pheno.rds")
+    # Extract GSE/GPL identifier (handle nested structure)
+    path_parts <- strsplit(gse_dir, "/")[[1]]
+    gse_id <- paste(path_parts[(length(path_parts)-1):length(path_parts)], collapse = "/")
+    # Try RDS first, then CSV
+    beta_file_rds <- file.path(gse_dir, "beta.rds")
+    M_file_rds <- file.path(gse_dir, "M.rds")
+    pheno_file_rds <- file.path(gse_dir, "pheno.rds")
+    beta_file_csv <- file.path(gse_dir, "beta.csv")
+    M_file_csv <- file.path(gse_dir, "M.csv")
+    pheno_file_csv <- file.path(gse_dir, "pheno.csv")
     
-    if (all(file.exists(beta_file), file.exists(M_file), file.exists(pheno_file))) {
-      cat(sprintf("Loading %s...\n", gse_id))
-      beta <- readRDS(beta_file)
-      M <- readRDS(M_file)
-      pheno <- readRDS(pheno_file)
+    # Check if RDS files exist
+    if (all(file.exists(beta_file_rds), file.exists(M_file_rds), file.exists(pheno_file_rds))) {
+      cat(sprintf("Loading %s from RDS...\n", gse_id))
+      beta <- readRDS(beta_file_rds)
+      M <- readRDS(M_file_rds)
+      pheno <- readRDS(pheno_file_rds)
+    } else if (all(file.exists(beta_file_csv), file.exists(M_file_csv), file.exists(pheno_file_csv))) {
+      # Load from CSV (probes as rows, samples as columns)
+      cat(sprintf("Loading %s from CSV...\n", gse_id))
+      beta <- read.csv(beta_file_csv, row.names = 1, check.names = FALSE)
+      M <- read.csv(M_file_csv, row.names = 1, check.names = FALSE)
+      pheno <- read.csv(pheno_file_csv, row.names = 1, check.names = FALSE)
+      
+      # Ensure beta and M are numeric matrices (probes x samples)
+      beta <- as.matrix(beta)
+      M <- as.matrix(M)
+      
+      # Ensure pheno has Sample_ID column (use rownames if missing)
+      if (!"Sample_ID" %in% colnames(pheno)) {
+        pheno$Sample_ID <- rownames(pheno)
+      }
       
       # Harmonize probe sets (use intersection)
       if (is.null(all_beta)) {
