@@ -1,0 +1,22 @@
+# CpGPT AJHG / tutorials environment
+#
+# Usage (recommended):
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install --upgrade pip
+#   pip install -r requirements-ajhg.txt
+#
+# Then in Cursor, select this virtualenv's Python interpreter for the project.
+
+# Install CpGPT from the local checkout (brings in core dependencies)
+-e .
+
+# Notebook + analysis tooling used in tutorials
+jupyter>=1.1.1
+ipykernel>=6.29.5
+seaborn>=0.13.2
+umap-learn>=0.5.6
+faiss-cpu>=1.9.0
+pyaging>=0.1.21
+gdown>=5.2.0
+
