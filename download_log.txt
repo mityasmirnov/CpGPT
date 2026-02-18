@@ -1,0 +1,167 @@
+Testing S3 access...
+✓ S3 access confirmed
+
+============================================================
+CpGCorpus Downloader for AJHG 2020
+============================================================
+Output directory: data/ajhg2020
+GSEs to process: 18
+Download QCDPB: True
+Download metadata: True
+Download gse_betas: False
+
+
+============================================================
+Processing GSE116992
+============================================================
+  Found 2 GPL(s): GPL13534, GPL21145
+
+  Processing GSE116992/GPL13534...
+    QCDPB.arrow already exists locally
+    ✓ Using existing QCDPB.arrow (7 samples, 485579 features)
+    metadata.arrow already exists locally
+    ✓ Using existing metadata.arrow
+
+  Processing GSE116992/GPL21145...
+    QCDPB.arrow already exists locally
+    ✓ Using existing QCDPB.arrow (22 samples, 865920 features)
+    metadata.arrow already exists locally
+    ✓ Using existing metadata.arrow
+
+============================================================
+Processing GSE66552
+============================================================
+  ⚠ GSE66552 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE74432
+============================================================
+  ⚠ GSE74432 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE97362
+============================================================
+  ⚠ GSE97362 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE116300
+============================================================
+  ⚠ GSE116300 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE95040
+============================================================
+  ⚠ GSE95040 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE104451
+============================================================
+  ⚠ GSE104451 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE125367
+============================================================
+  Found 1 GPL(s): GPL21145
+
+  Processing GSE125367/GPL21145...
+    Downloading QCDPB.arrow...
+    ✓ Downloaded QCDPB.arrow (44 samples, 865920 features)
+    Downloading metadata.arrow...
+    ✓ Downloaded metadata.arrow
+
+============================================================
+Processing GSE55491
+============================================================
+  ⚠ GSE55491 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE108423
+============================================================
+  ⚠ GSE108423 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE89353
+============================================================
+  ⚠ GSE89353 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE52588
+============================================================
+  ⚠ GSE52588 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE42861
+============================================================
+  ⚠ GSE42861 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE85210
+============================================================
+  ⚠ GSE85210 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE87571
+============================================================
+  ⚠ GSE87571 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE87648
+============================================================
+  ⚠ GSE87648 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE99863
+============================================================
+  ⚠ GSE99863 not found in CpGCorpus
+  → Attempting GEO fallback...
+  ⚠ GEO fallback failed: 
+
+============================================================
+Processing GSE35069
+============================================================
+  Found 1 GPL(s): GPL13534
+
+  Processing GSE35069/GPL13534...
+    ⚠ QCDPB.arrow not found in CpGCorpus
+    Downloading metadata.arrow...
+    ✓ Downloaded metadata.arrow
+
+============================================================
+✓ Download complete!
+============================================================
+Manifest saved to: data/ajhg2020/manifest.parquet
+
+Summary:
+  GSEs processed: 3
+  GPLs processed: 4
+  QCDPB files: 3
+  Metadata files: 4
+  Total samples: 73.0

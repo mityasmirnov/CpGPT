@@ -111,49 +111,156 @@ class IlluminaMethylationProber:
             return
 
         self.logger.info("Downloading Illumina metadata. Might take a while.")
-        url = "https://github.com/zhou-lab/InfiniumAnnotationV1.git"
         repo_name = "InfiniumAnnotationV1"
-        specific_commit = "7f5f2d43fc3e53cc29df793ea3f3e847b38cfc5d"
+        zip_url = "https://github.com/zhou-lab/InfiniumAnnotationV1/archive/refs/heads/main.zip"
 
-        # Full path to where the repository will be cloned
+        import zipfile
+        zip_path = self.manifests_dir / "main.zip"
+        extract_dir = self.manifests_dir / "InfiniumAnnotationV1-main"
+
+        def extract_and_flatten():
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(self.manifests_dir)
+            zip_path.unlink(missing_ok=True)
+            if extract_dir.exists():
+                for item in os.listdir(extract_dir):
+                    s = extract_dir / item
+                    d = self.manifests_dir / item
+                    if d.exists():
+                        shutil.rmtree(d) if d.is_dir() else d.unlink()
+                    shutil.move(str(s), str(d))
+                shutil.rmtree(extract_dir)
+            self.logger.info("Illumina metadata extracted successfully.")
+
+        # 0) Use existing main.zip or already-extracted dir (e.g. manual download)
+        if zip_path.exists() and zip_path.stat().st_size > 1000:
+            self.logger.info("Using existing main.zip.")
+            try:
+                extract_and_flatten()
+                return
+            except Exception as e:
+                self.logger.warning(f"Extract from existing zip failed: {e}")
+                zip_path.unlink(missing_ok=True)  # remove invalid/partial zip
+        if extract_dir.exists():
+            self.logger.info("Using existing extracted metadata.")
+            for item in os.listdir(extract_dir):
+                s = extract_dir / item
+                d = self.manifests_dir / item
+                if d.exists():
+                    shutil.rmtree(d) if d.is_dir() else d.unlink()
+                shutil.move(str(s), str(d))
+            shutil.rmtree(extract_dir)
+            return
+
+        # 1) Try curl (avoids Python SSL issues; 10 min timeout for slow networks)
+        curl_cmd = shutil.which("curl")
+        if curl_cmd:
+            self.logger.info("Downloading Illumina metadata with curl...")
+            try:
+                r = subprocess.run(
+                    [curl_cmd, "-sSL", "-o", str(zip_path), zip_url],
+                    timeout=600,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.TimeoutExpired:
+                zip_path.unlink(missing_ok=True)
+                self.logger.warning(
+                    "Download timed out. To use a manual download: save "
+                    "https://github.com/zhou-lab/InfiniumAnnotationV1/archive/refs/heads/main.zip "
+                    f"to {zip_path} and re-run."
+                )
+                r = None
+            if r is not None and r.returncode == 0 and zip_path.exists() and zip_path.stat().st_size > 1000:
+                try:
+                    extract_and_flatten()
+                    self.logger.info("Illumina metadata downloaded and extracted (curl).")
+                    return
+                except Exception as e:
+                    self.logger.warning(f"Zip extract failed: {e}")
+                    if zip_path.exists():
+                        zip_path.unlink(missing_ok=True)
+
+        # 2) Try Python urllib (with SSL workaround)
+        try:
+            import ssl
+            import urllib.error
+            import urllib.request
+            self.logger.info("Downloading Illumina metadata as zip...")
+            try:
+                req = urllib.request.Request(zip_url, headers={"User-Agent": "CpGPT/1.0"})
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    zip_path.write_bytes(resp.read())
+            except urllib.error.URLError as e:
+                if "CERTIFICATE_VERIFY_FAILED" in str(e) or "SSL" in str(e):
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+                        zip_path.write_bytes(resp.read())
+                else:
+                    raise
+            extract_and_flatten()
+            self.logger.info("Illumina metadata downloaded and extracted.")
+            return
+        except Exception as zip_err:
+            self.logger.warning(f"Zip download failed: {zip_err}. Trying git clone...")
+            for f in ("main.zip", "InfiniumAnnotationV1-main"):
+                p = self.manifests_dir / f
+                if p.exists():
+                    shutil.rmtree(p) if p.is_dir() else p.unlink()
+
+        # Fallback: git clone
+        url = "https://github.com/zhou-lab/InfiniumAnnotationV1.git"
+        specific_commit = "7f5f2d43fc3e53cc29df793ea3f3e847b38cfc5d"
         repo_path = self.manifests_dir / repo_name
+        git_cmd = shutil.which("git") or "git"
+        if repo_path.exists():
+            shutil.rmtree(repo_path)
 
         try:
-            # Clone the repository directly into self.manifests_dir
-            subprocess.run(
-                ["/usr/bin/git", "clone", "--quiet", "--depth", "1", url, repo_name],
+            result = subprocess.run(
+                [git_cmd, "clone", "--quiet", "--depth", "1", url, repo_name],
                 cwd=self.manifests_dir,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
-
-            # Checkout the specific commit
-            subprocess.run(
-                ["/usr/bin/git", "checkout", "--quiet", specific_commit],
+            if result.returncode != 0:
+                self.logger.error(f"Git clone failed: {result.stderr or result.stdout}")
+                raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+            checkout = subprocess.run(
+                [git_cmd, "checkout", "--quiet", specific_commit],
                 cwd=repo_path,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
-
-            # Move contents one level up to self.manifests_dir
+            if checkout.returncode != 0:
+                subprocess.run(
+                    [git_cmd, "fetch", "--depth", "1", "origin", specific_commit],
+                    cwd=repo_path,
+                    capture_output=True,
+                    timeout=60,
+                )
+                subprocess.run(
+                    [git_cmd, "checkout", "--quiet", specific_commit],
+                    cwd=repo_path,
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
             for item in os.listdir(repo_path):
                 s = repo_path / item
                 d = self.manifests_dir / item
                 if s.is_dir():
                     if d.exists():
-                        shutil.rmtree(d)  # Remove existing directory if it exists
+                        shutil.rmtree(d)
                     shutil.move(s, d)
                 else:
                     shutil.move(s, d)
-
-            # Remove the now-empty repo directory
             shutil.rmtree(repo_path)
-
-            self.logger.info(
-                "Illumina metadata downloaded, extracted, and decompressed successfully.",
-            )
+            self.logger.info("Illumina metadata downloaded via git successfully.")
         except subprocess.CalledProcessError:
             self.logger.exception("Failed to clone repository or checkout commit")
             if repo_path.exists():

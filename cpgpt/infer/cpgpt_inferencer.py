@@ -38,7 +38,13 @@ class CpGPTInferencer:
 
         """
         self.logger = get_class_logger(self.__class__)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Device selection: CUDA > MPS > CPU
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
         self.dependencies_dir = dependencies_dir
         self.data_dir = data_dir
         self.available_models = []
@@ -47,8 +53,10 @@ class CpGPTInferencer:
         self.logger.info(f"Using device: {self.device}.")
         self.logger.info(f"Using dependencies directory: {self.dependencies_dir}")
         self.logger.info(f"Using data directory: {self.data_dir}")
-        if self.device == "cpu":
+        if self.device.type == "cpu":
             self.logger.warning("Using CPU for inference. This may be slow.")
+        elif self.device.type == "mps":
+            self.logger.info("Using MPS (Apple Silicon) for inference.")
 
         # Initialize S3 client
         try:
