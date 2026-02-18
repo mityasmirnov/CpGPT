@@ -1,29 +1,29 @@
 # AJHG 2020 Label Audit Report
 
-Generated: 2026-02-18 16:04:36.129701
+Generated: 2026-02-18 22:42:22.549796
 
 ## Summary
 
 - Total GSE+GPL combinations: 4
-- Total samples: 539
-- Labeled samples: 539
+- Total samples: 307
+- Labeled samples: 307
 - Labeling rate: 100.0%
 
 ## Per-GSE Label Counts
 
 ### GSE116992/GPL13534
 
-- Samples: 210
+- Samples: 94
 - Labeled: 7
-- Unlabeled: 203
+- Unlabeled: 87
 - Label distribution:
   - BAFopathy: 7
 
 ### GSE116992/GPL21145
 
-- Samples: 225
+- Samples: 109
 - Labeled: 22
-- Unlabeled: 203
+- Unlabeled: 87
 - Label distribution:
   - BAFopathy: 22
 

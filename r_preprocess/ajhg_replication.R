@@ -25,6 +25,60 @@ CORRELATION_R2_CUTOFF <- 0.7  # R² threshold for correlation pruning (0.6-0.8 r
 SVM_SCORE_THRESHOLD <- 0.5  # Classification threshold
 N_PCS_FOR_BATCH <- 10  # Top N PCs for batch correction
 
+# Error handling wrapper function
+handle_errors <- function(expr, error_msg = "An error occurred", warn_on_error = TRUE) {
+  tryCatch({
+    expr
+  }, error = function(e) {
+    if (warn_on_error) {
+      cat(sprintf("ERROR: %s\n", error_msg))
+      cat(sprintf("Error details: %s\n", e$message))
+      cat(sprintf("Call stack:\n"))
+      print(sys.calls())
+    }
+    stop(e)
+  })
+}
+
+# Setup error handling
+options(error = function() {
+  cat("\n==========================================\n")
+  cat("FATAL ERROR DETECTED\n")
+  cat("==========================================\n")
+  cat("Error message:", geterrmessage(), "\n")
+  cat("\nCall stack:\n")
+  print(sys.calls())
+  cat("\n==========================================\n")
+  q(status = 1)
+})
+
+# Error handling wrapper function
+handle_errors <- function(expr, error_msg = "An error occurred", warn_on_error = TRUE) {
+  tryCatch({
+    expr
+  }, error = function(e) {
+    if (warn_on_error) {
+      cat(sprintf("ERROR: %s\n", error_msg))
+      cat(sprintf("Error details: %s\n", e$message))
+      cat(sprintf("Call stack:\n"))
+      print(sys.calls())
+    }
+    stop(e)
+  })
+}
+
+# Setup error handling
+options(error = function() {
+  cat("\n==========================================\n")
+  cat("FATAL ERROR DETECTED\n")
+  cat("==========================================\n")
+  cat("Error message:", geterrmessage(), "\n")
+  cat("\nCall stack:\n")
+  print(sys.calls())
+  cat("\n==========================================\n")
+  q(status = 1)
+})
+
 cat("==========================================\n")
 cat("AJHG 2020 Episignature Replication\n")
 cat("==========================================\n")
@@ -102,6 +156,29 @@ load_combined_data <- function(data_dir) {
   all_beta <- all_beta[common_probes, ]
   all_M <- all_M[common_probes, ]
   
+  # Filter out probes with infinite or missing values in M matrix
+  cat("Filtering probes with infinite/NA values...\n")
+  has_inf_or_na <- apply(all_M, 1, function(x) any(is.infinite(x) | is.na(x)))
+  if (sum(has_inf_or_na) > 0) {
+    cat(sprintf("Removing %d probes with infinite/NA values (out of %d total)\n",
+                sum(has_inf_or_na), nrow(all_M)))
+    valid_probes <- !has_inf_or_na
+    all_beta <- all_beta[valid_probes, ]
+    all_M <- all_M[valid_probes, ]
+  }
+  
+  # Also filter out probes with infinite/NA in beta matrix
+  has_inf_or_na_beta <- apply(all_beta, 1, function(x) any(is.infinite(x) | is.na(x)))
+  if (sum(has_inf_or_na_beta) > 0) {
+    cat(sprintf("Removing %d additional probes with infinite/NA values in beta (out of %d remaining)\n",
+                sum(has_inf_or_na_beta & !has_inf_or_na), nrow(all_beta)))
+    valid_probes_beta <- !has_inf_or_na_beta
+    all_beta <- all_beta[valid_probes_beta, ]
+    all_M <- all_M[valid_probes_beta, ]
+  }
+  
+  cat(sprintf("Final data: %d probes x %d samples\n", nrow(all_M), ncol(all_M)))
+  
   return(list(beta = all_beta, M = all_M, pheno = all_pheno))
 }
 
@@ -146,9 +223,12 @@ identify_family_groups <- function(pheno) {
   return(NULL)
 }
 
-# Function for AJHG feature selection per syndrome
+# Function for AJHG feature selection per syndrome (with error handling)
 ajhg_feature_selection <- function(M, pheno, syndrome, controls = "Control", train_indices = NULL) {
   cat(sprintf("\nFeature selection for %s...\n", syndrome))
+  
+  # Error handling wrapper
+  result <- tryCatch({
   
   # Use train_indices if provided (for cross-validation)
   if (!is.null(train_indices)) {
@@ -168,6 +248,19 @@ ajhg_feature_selection <- function(M, pheno, syndrome, controls = "Control", tra
   # Subset data
   M_subset <- M[, c(cases, controls_idx)]
   pheno_subset <- pheno[pheno$Sample_ID %in% c(cases, controls_idx), ]
+  
+  # Filter out probes with infinite or missing values globally (before any analysis)
+  has_inf_or_na <- apply(M_subset, 1, function(x) any(is.infinite(x) | is.na(x)))
+  if (sum(has_inf_or_na) > 0) {
+    cat(sprintf("Filtering out %d probes with infinite/NA values (out of %d total)\n",
+                sum(has_inf_or_na), nrow(M_subset)))
+    M_subset <- M_subset[!has_inf_or_na, ]
+  }
+  
+  if (nrow(M_subset) == 0) {
+    cat("Error: No valid probes remaining after filtering infinite/NA values\n")
+    return(NULL)
+  }
   
   # Build design matrix
   # Include: disease status, age, sex, cell counts, batch PCs
@@ -196,12 +289,41 @@ ajhg_feature_selection <- function(M, pheno, syndrome, controls = "Control", tra
   
   # Add batch PCs if multiple batches/platforms
   if ("Batch" %in% colnames(pheno_subset) || "GSE" %in% colnames(pheno_subset)) {
-    # Compute top PCs of methylation for batch correction
-    M_centered <- t(scale(t(M_subset), center = TRUE, scale = FALSE))
-    pca_result <- prcomp(t(M_centered), center = FALSE, scale. = FALSE)
-    n_pcs <- min(N_PCS_FOR_BATCH, ncol(pca_result$x))
-    for (i in 1:n_pcs) {
-      design_vars[[paste0("PC", i)]] <- pca_result$x[, i]
+    # Filter out probes with infinite, missing, or constant values before PCA
+    # Check for infinite or missing values
+    has_inf_or_na <- apply(M_subset, 1, function(x) any(is.infinite(x) | is.na(x)))
+    # Check for constant probes (zero variance)
+    probe_vars <- apply(M_subset, 1, var, na.rm = TRUE)
+    has_zero_var <- is.na(probe_vars) | probe_vars == 0
+    
+    # Keep only valid probes
+    valid_probes <- !has_inf_or_na & !has_zero_var
+    
+    if (sum(valid_probes) < 10) {
+      cat("Warning: Too few valid probes for PCA batch correction. Skipping batch PCs.\n")
+    } else {
+      M_subset_clean <- M_subset[valid_probes, ]
+      cat(sprintf("Filtered %d probes with infinite/NA/zero-variance values (kept %d probes for PCA)\n",
+                  sum(!valid_probes), sum(valid_probes)))
+      
+      # Compute top PCs of methylation for batch correction
+      M_centered <- t(scale(t(M_subset_clean), center = TRUE, scale = FALSE))
+      # Additional check: remove any remaining infinite/NA values
+      if (any(is.infinite(M_centered) | is.na(M_centered))) {
+        cat("Warning: Infinite/NA values detected after centering. Removing affected probes.\n")
+        bad_rows <- apply(M_centered, 1, function(x) any(is.infinite(x) | is.na(x)))
+        M_centered <- M_centered[!bad_rows, ]
+      }
+      
+      if (nrow(M_centered) < 10 || ncol(M_centered) < 2) {
+        cat("Warning: Insufficient data for PCA after filtering. Skipping batch PCs.\n")
+      } else {
+        pca_result <- prcomp(t(M_centered), center = FALSE, scale. = FALSE)
+        n_pcs <- min(N_PCS_FOR_BATCH, ncol(pca_result$x), nrow(pca_result$x))
+        for (i in 1:n_pcs) {
+          design_vars[[paste0("PC", i)]] <- pca_result$x[, i]
+        }
+      }
     }
   }
   
@@ -250,45 +372,131 @@ ajhg_feature_selection <- function(M, pheno, syndrome, controls = "Control", tra
   top_auc_probes <- names(sort(aucs, decreasing = TRUE))[1:n_keep]
   cat(sprintf("Kept %d probes after AUC filtering\n", length(top_auc_probes)))
   
-  # Correlation pruning
+  # Correlation pruning with error handling
   cat("Correlation pruning...\n")
-  beta_top <- beta_subset[top_auc_probes, ]
-  cor_matrix <- cor(t(beta_top), use = "pairwise.complete.obs")
   
-  # Greedy removal of correlated probes
-  selected_probes <- top_auc_probes
-  removed <- c()
-  
-  for (i in 1:length(selected_probes)) {
-    if (length(selected_probes) <= TARGET_PROBES) break
-    if (selected_probes[i] %in% removed) next
-    
-    # Find highly correlated probes
-    corrs <- cor_matrix[selected_probes[i], ]
-    corrs[selected_probes[i]] <- 0  # Exclude self
-    highly_corr <- names(corrs)[abs(corrs)^2 > CORRELATION_R2_CUTOFF]
-    
-    # Remove probes with lower AUC
-    to_remove <- intersect(highly_corr, selected_probes)
-    if (length(to_remove) > 0) {
-      aucs_to_remove <- aucs[to_remove]
-      # Keep the one with highest AUC, remove others
-      keep_probe <- names(which.max(aucs_to_remove))
-      to_remove <- setdiff(to_remove, keep_probe)
-      removed <- c(removed, to_remove)
-      selected_probes <- setdiff(selected_probes, to_remove)
-    }
+  # Ensure we have valid probes for correlation
+  if (length(top_auc_probes) < 2) {
+    cat("Warning: Too few probes for correlation pruning. Using all probes.\n")
+    final_probes <- top_auc_probes
+  } else {
+    tryCatch({
+      # Subset beta matrix to top AUC probes
+      beta_top <- beta_subset[top_auc_probes, , drop = FALSE]
+      
+      # Check for constant probes (zero variance) that would cause cor() to fail
+      probe_vars <- apply(beta_top, 1, var, na.rm = TRUE)
+      constant_probes <- names(probe_vars)[is.na(probe_vars) | probe_vars == 0]
+      
+      if (length(constant_probes) > 0) {
+        cat(sprintf("Warning: Removing %d constant probes before correlation pruning\n", length(constant_probes)))
+        top_auc_probes <- setdiff(top_auc_probes, constant_probes)
+        beta_top <- beta_subset[top_auc_probes, , drop = FALSE]
+      }
+      
+      if (length(top_auc_probes) < 2) {
+        cat("Warning: Too few probes after removing constants. Using all remaining probes.\n")
+        final_probes <- top_auc_probes
+      } else {
+        # Compute correlation matrix with error handling
+        cor_matrix <- tryCatch({
+          cor(t(beta_top), use = "pairwise.complete.obs")
+        }, error = function(e) {
+          cat(sprintf("Error computing correlation matrix: %s\n", e$message))
+          cat("Falling back to using all probes without correlation pruning.\n")
+          return(NULL)
+        })
+        
+        if (is.null(cor_matrix)) {
+          # Fallback: use all probes
+          final_probes <- top_auc_probes[1:min(TARGET_PROBES, length(top_auc_probes))]
+        } else {
+          # Ensure correlation matrix has proper rownames/colnames
+          if (is.null(rownames(cor_matrix))) {
+            rownames(cor_matrix) <- top_auc_probes
+          }
+          if (is.null(colnames(cor_matrix))) {
+            colnames(cor_matrix) <- top_auc_probes
+          }
+          
+          # Greedy removal of correlated probes
+          selected_probes <- top_auc_probes
+          removed <- c()
+          
+          for (i in 1:length(selected_probes)) {
+            if (length(selected_probes) <= TARGET_PROBES) break
+            if (selected_probes[i] %in% removed) next
+            
+            # Check if probe exists in correlation matrix
+            if (!selected_probes[i] %in% rownames(cor_matrix)) {
+              cat(sprintf("Warning: Probe %s not in correlation matrix, skipping\n", selected_probes[i]))
+              next
+            }
+            
+            # Find highly correlated probes
+            corrs <- cor_matrix[selected_probes[i], , drop = FALSE]
+            if (ncol(corrs) == 0) {
+              next
+            }
+            corrs_vec <- as.vector(corrs)
+            names(corrs_vec) <- colnames(corrs)
+            corrs_vec[selected_probes[i]] <- 0  # Exclude self
+            highly_corr <- names(corrs_vec)[abs(corrs_vec)^2 > CORRELATION_R2_CUTOFF]
+            
+            # Remove probes with lower AUC
+            to_remove <- intersect(highly_corr, selected_probes)
+            if (length(to_remove) > 0) {
+              aucs_to_remove <- aucs[to_remove]
+              # Keep the one with highest AUC, remove others
+              keep_probe <- names(which.max(aucs_to_remove))
+              to_remove <- setdiff(to_remove, keep_probe)
+              removed <- c(removed, to_remove)
+              selected_probes <- setdiff(selected_probes, to_remove)
+            }
+          }
+          
+          final_probes <- selected_probes[1:min(TARGET_PROBES, length(selected_probes))]
+        }
+      }
+    }, error = function(e) {
+      cat(sprintf("Error in correlation pruning: %s\n", e$message))
+      cat("Falling back to using top probes without correlation pruning.\n")
+      final_probes <- top_auc_probes[1:min(TARGET_PROBES, length(top_auc_probes))]
+    })
   }
   
-  final_probes <- selected_probes[1:min(TARGET_PROBES, length(selected_probes))]
   cat(sprintf("Final signature: %d probes\n", length(final_probes)))
   
-  return(list(
-    probes = final_probes,
-    aucs = aucs[final_probes],
-    delta_meth = delta_meth[final_probes],
-    pvalues = tt[final_probes, "P.Value"]
-  ))
+  # Validate final probes exist
+  if (length(final_probes) == 0) {
+    cat("ERROR: No probes selected after filtering. Returning NULL.\n")
+    return(NULL)
+  }
+  
+  # Check that all final probes exist in the data
+  missing_probes <- setdiff(final_probes, rownames(beta_subset))
+  if (length(missing_probes) > 0) {
+    cat(sprintf("Warning: %d final probes not found in beta_subset, removing them\n", length(missing_probes)))
+    final_probes <- setdiff(final_probes, missing_probes)
+  }
+  
+  if (length(final_probes) == 0) {
+    cat("ERROR: No valid probes remaining. Returning NULL.\n")
+    return(NULL)
+  }
+  
+    return(list(
+      probes = final_probes,
+      aucs = aucs[final_probes],
+      delta_meth = delta_meth[final_probes],
+      pvalues = tt[final_probes, "P.Value"]
+    ))
+  }, error = function(e) {
+    cat(sprintf("\nERROR in ajhg_feature_selection for %s:\n", syndrome))
+    cat(sprintf("Error message: %s\n", e$message))
+    cat("Returning NULL - this syndrome will be skipped.\n")
+    return(NULL)
+  })
 }
 
 # Function for SVM classification with Platt scaling
@@ -366,82 +574,140 @@ for (syndrome in syndromes) {
   cat(sprintf("Processing syndrome: %s\n", syndrome))
   cat("============================================================\n")
   
-  # Leave-one-GSE-out cross-validation if multiple GSEs available
-  if (!is.null(unique_gses) && length(unique_gses) > 1) {
-    cat("Performing leave-one-GSE-out cross-validation...\n")
-    cv_aucs <- numeric()
+  # Leave-one-sample-out cross-validation
+  # Pool all samples together (cases + controls) regardless of GSE/platform
+  cases_all <- pheno$Sample_ID[pheno$Disease == syndrome]
+  controls_all <- pheno$Sample_ID[pheno$Disease == "Control"]
+  
+  if (length(cases_all) >= 3 && length(controls_all) >= 3) {
+    cat("Performing leave-one-sample-out cross-validation...\n")
+    cat(sprintf("Total samples: %d cases + %d controls = %d total\n", 
+                length(cases_all), length(controls_all), 
+                length(cases_all) + length(controls_all)))
+    
+    # Collect CV predictions
+    cv_predictions <- numeric()
+    cv_labels <- numeric()
     cv_probes_list <- list()
     
-    for (test_gse in unique_gses) {
-      cat(sprintf("\nTest GSE: %s\n", test_gse))
-      
-      # Identify train/test split
-      if (!is.null(family_groups)) {
-        # Keep families together: if any member of a family is in test GSE, put entire family in test
-        test_families <- unique(family_groups[pheno$GSE == test_gse])
-        test_indices <- which(pheno$GSE == test_gse | (!is.na(family_groups) & family_groups %in% test_families))
-      } else {
-        test_indices <- which(pheno$GSE == test_gse)
+    # Get all sample indices for this syndrome comparison
+    all_sample_ids <- c(cases_all, controls_all)
+    all_sample_indices <- match(all_sample_ids, pheno$Sample_ID)
+    
+    # Leave-one-sample-out CV
+    n_samples <- length(all_sample_indices)
+    cat(sprintf("Performing %d-fold leave-one-out CV...\n", n_samples))
+    
+    for (i in 1:n_samples) {
+      if (i %% 10 == 0) {
+        cat(sprintf("  CV fold %d/%d...\n", i, n_samples))
       }
-      train_indices <- setdiff(1:nrow(pheno), test_indices)
       
-      # Check if we have enough samples in train/test
+      # Hold out sample i
+      test_idx <- all_sample_indices[i]
+      train_indices <- setdiff(all_sample_indices, test_idx)
+      
+      # Check train set has both cases and controls
       train_cases <- sum(pheno$Disease[train_indices] == syndrome, na.rm = TRUE)
-      train_controls <- sum(pheno$Disease[train_indices] %in% c("Control", "control"), na.rm = TRUE)
-      test_cases <- sum(pheno$Disease[test_indices] == syndrome, na.rm = TRUE)
-      test_controls <- sum(pheno$Disease[test_indices] %in% c("Control", "control"), na.rm = TRUE)
+      train_controls <- sum(pheno$Disease[train_indices] == "Control", na.rm = TRUE)
       
-      if (train_cases < 3 || train_controls < 3 || (test_cases == 0 && test_controls == 0)) {
-        cat(sprintf("Skipping %s: insufficient samples (train: %d cases, %d controls; test: %d cases, %d controls)\n",
-                    test_gse, train_cases, train_controls, test_cases, test_controls))
+      if (train_cases < 3 || train_controls < 3) {
+        # Skip if insufficient training samples
         next
       }
       
       # Feature selection on training set
-      sig_result <- ajhg_feature_selection(M, pheno, syndrome, controls = "Control", train_indices = train_indices)
+      sig_result <- tryCatch({
+        ajhg_feature_selection(M, pheno, syndrome, controls = "Control", train_indices = train_indices)
+      }, error = function(e) {
+        return(NULL)
+      })
+      
       if (is.null(sig_result) || length(sig_result$probes) == 0) {
-        cat("Skipping: feature selection failed\n")
         next
       }
       
-      cv_probes_list[[test_gse]] <- sig_result$probes
+      # Store probes for this fold (for analysis)
+      cv_probes_list[[i]] <- sig_result$probes
       
       # Train classifier on training set
-      classifier <- train_svm_classifier(beta, pheno, sig_result$probes, syndrome,
-                                         train_indices = train_indices, test_indices = test_indices)
+      classifier <- tryCatch({
+        train_svm_classifier(beta, pheno, sig_result$probes, syndrome,
+                             train_indices = train_indices, test_indices = test_idx)
+      }, error = function(e) {
+        return(NULL)
+      })
       
-      # Evaluate on test set
-      if (!is.null(classifier$probabilities_test)) {
-        test_labels <- pheno$Disease[test_indices]
-        test_labels_binary <- as.numeric(test_labels == syndrome)
-        test_probs <- classifier$probabilities_test[, syndrome]
-        
-        if (sum(test_labels_binary) > 0 && sum(test_labels_binary == 0) > 0) {
-          roc_obj <- roc(response = test_labels_binary, predictor = test_probs, quiet = TRUE)
-          cv_auc <- as.numeric(auc(roc_obj))
-          cv_aucs <- c(cv_aucs, cv_auc)
-          cat(sprintf("Test AUC: %.3f\n", cv_auc))
-        }
+      if (is.null(classifier)) {
+        next
       }
+      
+      # Predict on held-out sample
+      test_sample_id <- pheno$Sample_ID[test_idx]
+      test_label <- as.numeric(pheno$Disease[test_idx] == syndrome)
+      
+      # Get prediction for held-out sample
+      X_test <- t(beta[sig_result$probes, test_sample_id, drop = FALSE])
+      pred_test <- predict(classifier$model, X_test, probability = TRUE)
+      prob_test <- attr(pred_test, "probabilities")[1, syndrome]
+      
+      # Store prediction and label
+      cv_predictions <- c(cv_predictions, prob_test)
+      cv_labels <- c(cv_labels, test_label)
     }
     
-    if (length(cv_aucs) > 0) {
+    # Compute CV ROC if we have predictions
+    if (length(cv_predictions) > 0 && sum(cv_labels) > 0 && sum(cv_labels == 0) > 0) {
+      roc_cv <- roc(response = cv_labels, predictor = cv_predictions, quiet = TRUE)
+      cv_auc <- as.numeric(auc(roc_cv))
+      
       cv_results[[syndrome]] <- list(
-        mean_auc = mean(cv_aucs),
-        sd_auc = sd(cv_aucs),
-        cv_aucs = cv_aucs,
-        probes_per_fold = cv_probes_list
+        mean_auc = cv_auc,
+        sd_auc = NA,  # Single AUC from combined predictions
+        cv_aucs = cv_auc,
+        cv_predictions = cv_predictions,
+        cv_labels = cv_labels,
+        roc_obj = roc_cv,
+        probes_per_fold = cv_probes_list,
+        n_folds = length(cv_predictions)
       )
-      cat(sprintf("\nCross-validation AUC: %.3f (SD: %.3f)\n", mean(cv_aucs), sd(cv_aucs)))
+      
+      cat(sprintf("\nLeave-one-out CV AUC: %.3f (from %d folds)\n", 
+                  cv_auc, length(cv_predictions)))
+      
+      # Save CV ROC curve
+      png_file <- file.path(OUTPUT_DIR, paste0("roc_curve_cv_", syndrome, ".png"))
+      png(png_file, width = 800, height = 600)
+      plot(roc_cv, 
+           main = paste0("ROC Curve (Leave-One-Out CV): ", syndrome, 
+                        " (AUC = ", sprintf("%.3f", cv_auc), ")"),
+           print.auc = TRUE,
+           legacy.axes = TRUE,
+           xlab = "False Positive Rate (1 - Specificity)",
+           ylab = "True Positive Rate (Sensitivity)")
+      grid()
+      dev.off()
+      cat(sprintf("Saved CV ROC curve to %s\n", png_file))
+    } else {
+      cat("Warning: Could not compute CV ROC (insufficient predictions)\n")
     }
     
     # Use all data for final signature (for comparison with CpGPT)
     cat("\nComputing final signature on all data...\n")
+  } else {
+    cat(sprintf("Skipping CV: insufficient samples (%d cases, %d controls)\n",
+                length(cases_all), length(controls_all)))
   }
   
-  # Feature selection on all data (for final signature)
-  sig_result <- ajhg_feature_selection(M, pheno, syndrome)
-  if (!is.null(sig_result)) {
+  # Feature selection on all data (for final signature) - with error handling
+  sig_result <- tryCatch({
+    ajhg_feature_selection(M, pheno, syndrome)
+  }, error = function(e) {
+    cat(sprintf("ERROR computing final signature for %s: %s\n", syndrome, e$message))
+    return(NULL)
+  })
+  
+  if (!is.null(sig_result) && length(sig_result$probes) > 0) {
     signatures[[syndrome]] <- sig_result
     
     # Train classifier on all data
@@ -476,9 +742,8 @@ if (length(cv_results) > 0) {
   # Write CV summary table
   cv_summary <- data.frame(
     Syndrome = names(cv_results),
-    Mean_AUC = sapply(cv_results, function(x) x$mean_auc),
-    SD_AUC = sapply(cv_results, function(x) x$sd_auc),
-    N_Folds = sapply(cv_results, function(x) length(x$cv_aucs))
+    CV_AUC = sapply(cv_results, function(x) x$mean_auc),
+    N_Folds = sapply(cv_results, function(x) x$n_folds)
   )
   write.table(cv_summary, file.path(OUTPUT_DIR, "cv_summary.txt"), 
               row.names = FALSE, sep = "\t", quote = FALSE)

@@ -240,3 +240,6 @@ pyaging_data/
 Makefile
 .DS_Store
 .coveragerc
+
+# External volume / results (do not commit)
+/Volumes/
