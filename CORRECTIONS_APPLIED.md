@@ -133,12 +133,54 @@ All critical corrections from the sanity check review have been implemented. The
 
 ---
 
+### 8. CpGPT Full Inference (cpgpt_infer) Fixes ✅ (Feb 19, 2026)
+
+**Context**: Running `make cpgpt_infer` to produce both sample embeddings and reconstruction for anomaly detection.
+
+**Fixes Applied**:
+
+1. **Makefile**
+   - `cpgpt_infer` now passes `--batch-size 1` to the inference script to avoid OOM on 16GB systems (reconstruction over ~450k–900k loci is memory-heavy).
+
+2. **`scripts/cpgpt_inference.py`**
+   - **Predict return type**: `CpGPTTrainer.predict()` returns a single **dict** of concatenated tensors (keyed by `return_keys`), not a list of per-batch dicts. The script was updated to use `embeddings["sample_embedding"]` and `reconstructions["pred_meth"]` / `reconstructions["pred_meth_unc"]` directly instead of `torch.cat([e["sample_embedding"] for e in embeddings], dim=0)`.
+   - **Datamodule for reconstruction**: Reconstruct mode requires `trainer.datamodule` in the model’s `on_predict_epoch_start` (for embedder and hparams). Both predict calls now use `datamodule=data_module` instead of `dataloaders=data_module.predict_dataloader()`.
+   - **Genomic locations**: Reconstruct mode requires a `genomic_locations` kwarg. Added `load_genomic_locations_from_processed_dir()` to read locations from `processed_dir/genomic_locations.db` (by species) and pass `genomic_locations=...` into the reconstruction `predict()` call. If the DB or species is missing, reconstruction is skipped and a clear message is printed.
+   - **Sample IDs**: Sample IDs are loaded from `obs_names.npy` in each processed dataset directory via `load_sample_ids_from_processed_dir()` instead of being inferred from the dataloader loop.
+   - **Progress output**: Added `flush=True` on key prints so progress is visible when stdout is redirected (e.g. `tee` to a log file).
+
+3. **UMAP visualization**
+   - **Samplesheet format**: `scripts/visualize_embeddings_umap.py` now supports both CSV and Parquet samplesheets (uses `pd.read_parquet` when path ends with `.parquet`).
+   - **Makefile**: `visualize_embeddings` uses `samplesheet.csv`; added target `visualize_embeddings_only` to visualize existing `sample_embeddings.pt` without re-running embeddings (useful with `RESULTS_DIR` override for external volume).
+
+**Files Modified**:
+- `Makefile`: `--batch-size 1` for `cpgpt_infer`; `visualize_embeddings` samplesheet → CSV; new `visualize_embeddings_only` target.
+- `scripts/cpgpt_inference.py`: dict-based predict handling, datamodule usage, genomic_locations loading, sample ID loading from processed dir, flush on prints.
+- `scripts/visualize_embeddings_umap.py`: load_samplesheet supports CSV and Parquet.
+
+**Usage (external volume)**:
+```bash
+# Full inference (embeddings + reconstruction)
+PYTHON=python3 make cpgpt_infer \
+  DEPENDENCIES_DIR=/Volumes/Dima_work/cpgpt_data/dependencies \
+  RESULTS_DIR=/Volumes/Dima_work/cpgpt_data/results \
+  CPGPT_PROCESSED_DIR=/Volumes/Dima_work/cpgpt_data/data/cpgpt_processed
+
+# Visualize existing embeddings only
+PYTHON=python3 make visualize_embeddings_only RESULTS_DIR=/Volumes/Dima_work/cpgpt_data/results
+```
+
+---
+
 ## Files Modified
 
 1. ✅ `scripts/build_ajhg2020_samplesheet.py` - Label scheme corrections
 2. ✅ `scripts/convert_cpgcorpus_to_r_format.py` - DataSaver sample_id fix
 3. ✅ `scripts/anomaly_detection.py` - Masking-based detection
 4. ✅ Plan document - All corrections documented
+5. ✅ `Makefile` - cpgpt_infer batch-size 1, visualize_embeddings samplesheet, visualize_embeddings_only target (Feb 19, 2026)
+6. ✅ `scripts/cpgpt_inference.py` - Predict dict handling, datamodule, genomic_locations, sample IDs (Feb 19, 2026)
+7. ✅ `scripts/visualize_embeddings_umap.py` - Samplesheet CSV/Parquet support (Feb 19, 2026)
 
 ## Testing Checklist
 
